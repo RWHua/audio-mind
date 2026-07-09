@@ -38,8 +38,9 @@
 ## 7. Skills
 
 本项目配有 Claude Code / Hermes 专用 Skill，用于 Pipeline 运行与故障排查：
-- **audio-mind-pipeline** — 详见 `.claude/skills/audio-mind-pipeline/SKILL.md`
-  涵盖：引擎切换、火山引擎 45000000/45000010 错误诊断、venv 污染修复、下载残留清理。
+- **audio-mind-pipeline** — 详见 `.claude/skills/audio-mind-pipeline/SKILL.md`（v2.0.0）
+  涵盖：引擎切换、火山引擎 45000000/45000006/45000010 错误诊断、OSS 自动上传桥接、
+  说话人分离(speaker diarization)、LLM 说话人识别、转录为空修复、venv 污染修复、下载残留清理。
 
 ## User Persona
 <!--
