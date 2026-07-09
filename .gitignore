@@ -1,0 +1,47 @@
+# 环境变量
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# 音频文件
+*.mp3
+*.m4a
+*.wav
+*.ogg
+*.flac
+*.aac
+*.wma
+*.opus
+*.webm
+
+# 临时文件
+*.tmp
+*.temp
+temp_*
+*.part
+
+# 输出目录
+output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# uv
+uv.lock
