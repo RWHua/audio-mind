@@ -1,3 +1,7 @@
+
+import pytest
+pytestmark = pytest.mark.integration
+
 """测试 OSS 上传（用正确的设置）"""
 import os, hashlib, hmac, base64, hashlib
 from datetime import datetime, timezone
@@ -7,8 +11,8 @@ from pathlib import Path
 
 load_dotenv()
 
-AK_ID = os.environ["ALIBABA_ACCESS_KEY_ID"]
-AK_SECRET = os.environ["ALIBABA_ACCESS_KEY_SECRET"]
+AK_ID = os.environ.get("ALIBABA_ACCESS_KEY_ID", "")
+AK_SECRET = os.environ.get("ALIBABA_ACCESS_KEY_SECRET", "")
 
 _WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",

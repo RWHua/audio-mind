@@ -173,6 +173,7 @@ def run_pipeline(
     logger.info("=" * 50)
     logger.info("Stage 2/3: 语音转写")
     logger.info("=" * 50)
+    transcribe_start = time.monotonic()
 
     # 长音频警告（本地 Whisper 时）
     _warn_long_audio(episode.duration_seconds, settings)
@@ -180,10 +181,18 @@ def run_pipeline(
     if progress_callback:
         progress_callback("transcribe", 0, "开始语音转写...")
 
-    provider = settings.transcriber.provider
-    if provider == "volcengine":
+    _PROVIDERS = {
+        "volcengine": transcribe_volcengine,
+        "alibaba": transcribe_alibaba,
+        "whisper": transcribe,
+    }
+    provider_fn = _PROVIDERS.get(settings.transcriber.provider)
+    if not provider_fn:
+        raise ConfigurationError(f"未知的转写引擎: {settings.transcriber.provider}")
+
+    if settings.transcriber.provider == "volcengine":
         logger.info("使用火山引擎豆包语音识别（云端）")
-        transcript = transcribe_volcengine(
+        transcript = provider_fn(
             audio_path,
             settings=settings,
             public_url=episode.audio_url,
@@ -192,9 +201,9 @@ def run_pipeline(
                 progress_callback("transcribe", p, s) if progress_callback else None
             ),
         )
-    elif provider == "alibaba":
+    elif settings.transcriber.provider == "alibaba":
         logger.info("使用阿里云智能语音交互（云端）")
-        transcript = transcribe_alibaba(
+        transcript = provider_fn(
             audio_path,
             settings=settings,
             public_url=episode.audio_url,
@@ -203,8 +212,8 @@ def run_pipeline(
             ),
         )
     else:
-        logger.info(f"使用本地 faster-whisper 模型")
-        transcript = transcribe(
+        logger.info("使用本地 faster-whisper 模型")
+        transcript = provider_fn(
             audio_path,
             settings=settings,
             progress_callback=lambda p, s: (
@@ -215,6 +224,8 @@ def run_pipeline(
     if progress_callback:
         progress_callback("transcribe", 100, "转写完成")
 
+    logger.info("⏱ 转写阶段总耗时: %.1fs", time.monotonic() - transcribe_start)
+
     # 超时检查
     _check_timeout(start_time, settings, "transcribe")
 
@@ -222,6 +233,7 @@ def run_pipeline(
     logger.info("=" * 50)
     logger.info("Stage 3/3: 内容分析")
     logger.info("=" * 50)
+    analyze_start = time.monotonic()
 
     if progress_callback:
         progress_callback("analyze", 0, "正在分析播客内容...")
@@ -237,6 +249,8 @@ def run_pipeline(
 
     if progress_callback:
         progress_callback("analyze", 100, "分析完成")
+
+    logger.info("⏱ 分析阶段总耗时: %.1fs", time.monotonic() - analyze_start)
 
     # 超时检查
     _check_timeout(start_time, settings, "analyze")

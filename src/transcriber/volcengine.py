@@ -25,13 +25,13 @@ from typing import Optional
 import requests
 
 from src.exceptions import (
-    AudioPreprocessError,
     WhisperRuntimeError,
     ConfigurationError,
 )
 from src.models import TranscriptResult, TranscriptSegment
 from src.utils.config import get_settings, AppSettings
 from src.utils.logger import setup_logger
+from src.utils.oss import upload_to_oss
 
 logger = setup_logger("audio-mind.transcriber.volcengine")
 
@@ -42,39 +42,54 @@ DEFAULT_RESOURCE_ID = "volc.seedasr.auc"
 DEFAULT_MODEL_NAME = "bigmodel"
 DEFAULT_API_TIMEOUT = 30
 POLL_INTERVAL = 5
-MAX_POLL_SECONDS = 600
+MAX_POLL_SECONDS = 1200
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2.0
 
 
 def _check_ffmpeg() -> None:
-    """确认 ffprobe 可用"""
+    """确认 ffprobe 可用（非必需，缺失时降级为 warning）
+
+    volcengine 为整段音频一次性提交，不依赖 ffmpeg 切片/重采样。
+    ffprobe 仅用于读取音频时长，缺失时改用 mutagen 读取。
+    """
     try:
         subprocess.run(["ffprobe", "-version"], capture_output=True, timeout=10)
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        raise AudioPreprocessError(
-            "找不到 ffprobe，请确认 ffmpeg 已安装并加入 PATH\n"
-            "安装: winget install ffmpeg  或  choco install ffmpeg"
+        logger.warning(
+            "未找到 ffprobe（ffmpeg 未安装或不在 PATH），"
+            "将使用 mutagen 读取音频时长，转写不受影响"
         )
 
 
 def _get_audio_duration(audio_path: Path) -> float:
-    """用 ffprobe 获取音频时长（秒）"""
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-show_entries", "format=duration",
-        "-of", "csv=p=0",
-        str(audio_path),
-    ]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=15,
-        encoding="utf-8", errors="replace",
-    )
+    """获取音频时长（秒），优先 ffprobe，缺失时回退到 mutagen"""
     try:
-        return float(result.stdout.strip())
-    except ValueError:
-        logger.warning("无法获取音频时长，假设为 30 分钟")
-        return 30 * 60
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet",
+             "-show_entries", "format=duration",
+             "-of", "csv=p=0",
+             str(audio_path)],
+            capture_output=True, text=True, timeout=15,
+            encoding="utf-8", errors="replace",
+        )
+        duration = float(result.stdout.strip())
+        if duration > 0:
+            return duration
+    except (subprocess.SubprocessError, ValueError, FileNotFoundError):
+        pass
+
+    # fallback: 用 mutagen 读取音频元数据时长
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(str(audio_path))
+        if audio is not None and audio.info is not None and audio.info.length:
+            return float(audio.info.length)
+    except Exception as e:
+        logger.warning("mutagen 读取时长失败: %s", e)
+
+    logger.warning("无法获取音频时长，假设为 30 分钟")
+    return 30 * 60
 
 
 def _detect_audio_format(audio_path: Path) -> str:
@@ -88,159 +103,7 @@ def _detect_audio_format(audio_path: Path) -> str:
     return format_map.get(suffix, suffix)
 
 
-# ── OSS 上传辅助 ────────────────────────────────────────
-_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-
-def _gmt_now() -> str:
-    """返回 GMT 格式时间字符串"""
-    now = datetime.now(timezone.utc)
-    return (
-        f"{_WEEKDAYS[now.weekday()]}, "
-        f"{now.day:02d} {_MONTHS[now.month - 1]} {now.year} "
-        f"{now.hour:02d}:{now.minute:02d}:{now.second:02d} GMT"
-    )
-
-
-def _oss_sign(method: str, ak_secret: str, date: str,
-              content_type: str = "", content_md5: str = "",
-              resource: str = "/") -> str:
-    """计算 OSS REST API HMAC-SHA1 签名"""
-    string_to_sign = (
-        f"{method.upper()}\n"
-        f"{content_md5}\n"
-        f"{content_type}\n"
-        f"{date}\n"
-        f"{resource}"
-    )
-    h = hmac.new(
-        ak_secret.encode("utf-8"),
-        string_to_sign.encode("utf-8"),
-        hashlib.sha1,
-    )
-    return base64.b64encode(h.digest()).decode("utf-8")
-
-
-def _oss_bucket_endpoint(bucket: str, region: str) -> str:
-    """返回 bucket 级 OSS 域名"""
-    return f"{bucket}.oss-{region}.aliyuncs.com"
-
-
-def _ensure_bucket(bucket: str, region: str, ak_id: str, ak_secret: str) -> None:
-    """确保 OSS bucket 存在，不存在则创建"""
-    bucket_endpoint = _oss_bucket_endpoint(bucket, region)
-
-    # 检查 bucket 是否存在
-    gmtnow = _gmt_now()
-    sig = _oss_sign("HEAD", ak_secret, gmtnow, resource="/")
-    resp = requests.head(
-        f"https://{bucket_endpoint}/",
-        headers={"Date": gmtnow, "Authorization": f"OSS {ak_id}:{sig}"},
-        timeout=15,
-    )
-    if resp.status_code == 200:
-        logger.info("OSS Bucket 已存在: %s", bucket)
-        return
-
-    # 创建 bucket
-    logger.info("创建 OSS Bucket: %s (%s)", bucket, region)
-    gmtnow = _gmt_now()
-    create_body = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<CreateBucketConfiguration>\n'
-        f'  <LocationConstraint>{region}</LocationConstraint>\n'
-        '</CreateBucketConfiguration>'
-    )
-    content_md5 = base64.b64encode(
-        hashlib.md5(create_body.encode("utf-8")).digest()
-    ).decode("utf-8")
-    sig = _oss_sign(
-        "PUT", ak_secret, gmtnow,
-        content_type="application/xml",
-        content_md5=content_md5, resource="/",
-    )
-    resp = requests.put(
-        f"https://{bucket_endpoint}/",
-        headers={
-            "Date": gmtnow,
-            "Content-Type": "application/xml",
-            "Content-MD5": content_md5,
-            "Authorization": f"OSS {ak_id}:{sig}",
-        },
-        data=create_body,
-        timeout=15,
-    )
-    if resp.status_code in (200, 201, 409):
-        logger.info("OSS Bucket 就绪: %s", bucket)
-    else:
-        raise WhisperRuntimeError(
-            "创建 OSS Bucket 失败",
-            detail=f"HTTP {resp.status_code}: {resp.text[:300]}",
-        )
-
-
-def _get_mime_type(suffix: str) -> str:
-    """根据文件后缀返回 MIME type"""
-    mapping = {
-        ".m4a": "audio/mp4", ".mp3": "audio/mpeg",
-        ".wav": "audio/wav", ".flac": "audio/flac",
-        ".ogg": "audio/ogg", ".aac": "audio/aac",
-    }
-    return mapping.get(suffix.lower(), "application/octet-stream")
-
-
-def _upload_to_oss(local_path: Path, settings: AppSettings) -> str:
-    """上传音频到阿里云 OSS（使用 oss2 SDK），返回公网 URL"""
-    try:
-        import oss2
-    except ImportError:
-        raise ConfigurationError(
-            "OSS 上传需要 oss2 库",
-            detail="请运行: uv pip install oss2",
-        )
-
-    aliyun = settings.alibaba
-    if not aliyun.access_key_id or not aliyun.access_key_secret:
-        raise ConfigurationError(
-            "OSS 上传需要阿里云凭证",
-            detail="请在 .env 中设置 ALIBABA_ACCESS_KEY_ID 和 ALIBABA_ACCESS_KEY_SECRET",
-        )
-
-    bucket_name = aliyun.oss_bucket
-    region = aliyun.oss_region
-    endpoint = f"https://oss-{region}.aliyuncs.com"
-
-    auth = oss2.Auth(aliyun.access_key_id, aliyun.access_key_secret)
-    bucket = oss2.Bucket(auth, endpoint, bucket_name)
-
-    stem = local_path.stem
-    suffix = local_path.suffix or ".m4a"
-    object_key = f"audio-mind/{stem}{suffix}"
-
-    size_mb = local_path.stat().st_size / 1024 / 1024
-    logger.info("上传音频到 OSS: %s/%s (%.1fMB)", bucket_name, object_key, size_mb)
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            bucket.put_object_from_file(object_key, str(local_path))
-            url = f"https://{bucket_name}.oss-{region}.aliyuncs.com/{object_key}"
-            logger.info("OSS 上传完成: %s", url)
-            return url
-        except oss2.exceptions.ServerError as e:
-            logger.warning(
-                "第 %d/%d 次 OSS 上传失败: %s - %s",
-                attempt, MAX_RETRIES, e.code, str(e.message)[:200],
-            )
-        except Exception as e:
-            logger.warning("第 %d/%d 次 OSS 上传错误: %s", attempt, MAX_RETRIES, e)
-
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_BACKOFF * attempt)
-
-    raise WhisperRuntimeError("OSS 上传失败", detail=f"重试 {MAX_RETRIES} 次后仍失败")
-
+# ── OSS 上传辅助 (委托给 src.utils.oss) ────────────────
 
 def _identify_speakers(
     segments: list,
@@ -428,7 +291,7 @@ def transcribe_volcengine(
         status_msg = resp.headers.get("X-Api-Message", "")
 
         if status_code == "20000000":
-            logger.info("转写任务已成功提交")
+            logger.info("转写任务已成功提交（提交耗时 %.1fs）", time.monotonic() - submit_start)
             break
         else:
             last_error = "[%s] %s" % (status_code, status_msg)
@@ -457,6 +320,7 @@ def transcribe_volcengine(
     text = ""
     segments = []
     poll_start = time.time()
+    poll_mono_start = time.monotonic()
     consecutive_bad_url = 0
     oss_retried = False
     url = public_url
@@ -508,7 +372,11 @@ def transcribe_volcengine(
                         ))
                     # Rebuild full_text from segments for consistency
                     text = "\n".join(s.text for s in segments)
-                logger.info("转写完成: %d 字符, %d 片段", len(text), len(segments))
+                logger.info(
+                    "转写完成: %d 字符, %d 片段（等待耗时 %.1fs）",
+                    len(text), len(segments),
+                    time.monotonic() - poll_mono_start,
+                )
                 break
             except json.JSONDecodeError:
                 raise WhisperRuntimeError(
@@ -532,7 +400,13 @@ def transcribe_volcengine(
                     "CDN URL 不可达，尝试上传到 OSS 后重试..."
                 )
                 try:
-                    oss_url = _upload_to_oss(audio_path, settings)
+                    oss_url = upload_to_oss(
+                        audio_path,
+                        settings.alibaba.access_key_id,
+                        settings.alibaba.access_key_secret,
+                        settings.alibaba.oss_bucket,
+                        settings.alibaba.oss_region,
+                    )
                     # --- 用 OSS URL 重新提交 ---
                     new_request_id = str(uuid.uuid4())
                     submit_headers["X-Api-Request-Id"] = new_request_id
@@ -552,6 +426,7 @@ def transcribe_volcengine(
                         logger.info("OSS URL 重新提交成功")
                         oss_retried = True
                         poll_start = time.time()
+                        poll_mono_start = time.monotonic()
                         consecutive_bad_url = 0
                         continue
                     else:
@@ -582,7 +457,9 @@ def transcribe_volcengine(
 
     # ── 说话人识别：用 LLM 推断编号对应的真实姓名 ──
     if episode_info and segments:
+        speaker_start = time.monotonic()
         speaker_map = _identify_speakers(segments, episode_info, settings)
+        logger.info("说话人识别耗时: %.1fs", time.monotonic() - speaker_start)
         if speaker_map:
             for seg in result.segments:
                 if seg.text.startswith("说话人") and ": " in seg.text:

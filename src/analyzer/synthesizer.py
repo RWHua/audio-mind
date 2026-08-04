@@ -8,6 +8,7 @@
 """
 
 import json
+import time
 from typing import Optional
 
 from src.analyzer.client import DeepSeekClient, load_prompt, extract_json
@@ -118,6 +119,7 @@ def _analyze_long(
 
     summary_parts: list[str] = []
     for i, chunk in enumerate(chunks, 1):
+        seg_start = time.monotonic()
         sys_prompt, usr_prompt = load_prompt("summarize_chunk")
         usr_prompt = usr_prompt.replace("{{chunk_index}}", str(i))
         usr_prompt = usr_prompt.replace("{{total_chunks}}", str(len(chunks)))
@@ -126,9 +128,11 @@ def _analyze_long(
         logger.info(f"分析第 {i}/{len(chunks)} 段 ({len(chunk)} 字)...")
         response = client.chat(sys_prompt, usr_prompt)
         summary_parts.append(response)
+        logger.info(f"第 {i}/{len(chunks)} 段摘要完成，耗时: {time.monotonic() - seg_start:.1f}s")
 
     # --- 阶段 2: 全局合成 ---
     logger.info("开始全局合成...")
+    syn_start = time.monotonic()
     chunk_summaries = "\n\n---\n\n".join(
         f"## 第 {i+1}/{len(summary_parts)} 段\n{s}"
         for i, s in enumerate(summary_parts)
@@ -141,5 +145,6 @@ def _analyze_long(
 
     response = client.chat(sys_prompt, usr_prompt)
     json_text = extract_json(response)
+    logger.info(f"全局合成完成，耗时: {time.monotonic() - syn_start:.1f}s")
 
     return _parse_analysis_json(json_text)

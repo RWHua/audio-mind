@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## 1. Project Overview
 - 自动播客洞察 Agent：从播客平台（小宇宙 App 等）抓取音频，转写为文字，再根据用户性格画像提取有价值的洞察与行动项。
@@ -7,7 +7,7 @@
 
 ## 2. Commands
 - 安装依赖：根据你选择的包管理工具自行定义（uv 均可）
-- 启动 Agent：在 Claude Code 对话中粘贴播客链接即可触发，Agent 自动识别并执行完整流程（内部通过 `python -m src.pipeline` 调用）
+- 启动 Agent：在 Codex 对话中粘贴播客链接即可触发，Agent 自动识别并执行完整流程（内部通过 `python -m src.pipeline` 调用）
 - 跑测试：你选的测试框架自行定义命令，跑通后再交付
 - 你需要自己先跑通完整流程（下载 → 转写 → 分析），确认无报错后再提交给我验收。
 
@@ -19,7 +19,7 @@
 - Python 文件用 snake_case
 - 所有 LLM Prompt 模板放 `prompts/` 目录，不在代码中硬编码长字符串
 - 所有外部 API 调用必须有超时设置 + 重试机制
-- 用户画像持久化存储在 CLAUDE.md 的 `## User Persona` 段，首次使用时代理会逐项引导用户填写详细画像（10 项引导问题），之后每次运行自动读取。如需修改画像，直接编辑该段或删除后重新对话即可。
+- 用户画像持久化存储在 AGENTS.md 的 `## User Persona` 段，首次使用时代理会逐项引导用户填写详细画像（10 项引导问题），之后每次运行自动读取。如需修改画像，直接编辑该段或删除后重新对话即可。
 - 错误处理用自定义异常类，不要裸抛 `Exception`
 - 所有开发、测试及代码操作过程必须输出详细日志并归档保存，便于问题追溯与复盘
 
@@ -34,11 +34,11 @@
 - 小宇宙 App 没有公开 API，音频链接通常可以从分享链接中提取，部分播客同时发布到 Apple Podcasts / RSS，可考虑走 RSS feed 作为备选抓取路径。（2026-06-29 已验证：小宇宙分享页面为 SSR 渲染，HTML 源码中 `<meta property=\"og:audio\">` 直接包含 CDN 音频链接——阿里云 OSS，无需鉴权；`<script name=\"schema:podcast-show\">` JSON-LD 含完整播客元数据。RSS feed 作为备选。）
 - 中文播客转写注意 Whisper 对中文长音频的准确率和超时问题，自行评估是否需要切片
 - 分析阶段如果转录文本很长，注意 LLM 的上下文窗口限制，提前设计分段策略
-- 用户画像存储在 CLAUDE.md 的 `## User Persona` 段中，第一次运行时 Agent 会引导你填写详细画像（10 项问题），之后自动读取。如需修改，直接编辑该段或删除后重新对话
+- 用户画像存储在 AGENTS.md 的 `## User Persona` 段中，第一次运行时 Agent 会引导你填写详细画像（10 项问题），之后自动读取。如需修改，直接编辑该段或删除后重新对话
 
 ## 7. Skills
 
-本项目配有 Claude Code / Hermes 专用 Skill，用于 Pipeline 运行与故障排查：
+本项目配有 Codex / Hermes 专用 Skill，用于 Pipeline 运行与故障排查：
 - **audio-mind-pipeline** — 详见 `.claude/skills/audio-mind-pipeline/SKILL.md`（v2.0.0）
   涵盖：引擎切换、火山引擎 45000000/45000006/45000010 错误诊断、OSS 自动上传桥接、
   说话人分离(speaker diarization)、LLM 说话人识别、转录为空修复、venv 污染修复、下载残留清理。
@@ -57,7 +57,7 @@
 - **education**: 普通本科，信息管理与信息系统专业
 
 ### 专业兴趣
-- Agent 使用与开发（深度使用 Claude Code，贯彻 Harness 工程）
+- Agent 使用与开发（深度使用 Codex，贯彻 Harness 工程）
 - AI 科技前沿与商业应用
 - 数字克隆人
 - AI 生图模型与文创创作

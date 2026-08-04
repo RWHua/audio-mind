@@ -16,6 +16,7 @@ dependencies = [
     "tenacity>=8.2.0",
     "python-dotenv>=1.0.0",
     "oss2>=2.19.1",
+    "mutagen>=1.47.0",
 ]
 
 [project.scripts]
@@ -31,6 +32,9 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "integration: tests that require API keys and network access",
+]
 
 [dependency-groups]
 dev = [

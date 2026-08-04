@@ -1,3 +1,7 @@
+
+import pytest
+pytestmark = pytest.mark.integration
+
 """轮询 GetTaskResult 获取转写文本"""
 import os, hashlib, hmac, base64, urllib.parse, json, time, uuid
 from datetime import datetime, timezone
@@ -6,8 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AK_ID = os.environ["ALIBABA_ACCESS_KEY_ID"]
-AK_SECRET = os.environ["ALIBABA_ACCESS_KEY_SECRET"]
+AK_ID = os.environ.get("ALIBABA_ACCESS_KEY_ID", "")
+AK_SECRET = os.environ.get("ALIBABA_ACCESS_KEY_SECRET", "")
 TASK_ID = "f06b41f87ea04239be0c8f2f2a403df7"
 ENDPOINT = "filetrans.cn-shanghai.aliyuncs.com"
 VERSION = "2018-08-17"

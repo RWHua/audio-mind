@@ -5,6 +5,7 @@
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +58,7 @@ class DeepSeekClient:
         """
         logger.info(f"调用 DeepSeek API ({self.model})...")
 
+        call_start = time.monotonic()
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -78,6 +80,7 @@ class DeepSeekClient:
 
         logger.info(
             f"API 调用完成: "
+            f"耗时={time.monotonic() - call_start:.1f}s, "
             f"input={usage.prompt_tokens} tok, "
             f"output={usage.completion_tokens} tok, "
             f"total={usage.total_tokens} tok"
