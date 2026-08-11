@@ -14,10 +14,22 @@
 # 安装依赖（uv 会自动管理 Python 版本）
 uv sync
 
-# 配置 DeepSeek API Key
+# 配置 API 密钥（转写/分析必需）
 cp .env.example .env
-# 编辑 .env，填入你的 DEEPSEEK_API_KEY
+# 编辑 .env，填入你的 API Key（来源见下方「API 密钥获取」）
 ```
+
+**⚠️ 安全提示**：`.env` 已被 `.gitignore` 排除，**切勿把真实 Key 写入任何会被提交的文件**（README、代码、示例配置都不行）。Key 只在本地 `.env` 中维护。
+
+### API 密钥获取（Key 来源）
+
+| 服务 | 用途 | 获取方式 |
+|------|------|---------|
+| **火山引擎**（默认转写引擎） | 语音转写（豆包语音识别大模型） | [火山引擎语音技术控制台](https://console.volcengine.com/speech/app) → 旧版控制台 → 创建应用 → 勾选「录音文件识别大模型 → 录音文件识别大模型极速版」→ 复制 **APP ID** 和 **Access Token**，填入 `VOLCENGINE_APP_ID` / `VOLCENGINE_ACCESS_TOKEN` |
+| **阿里云**（备用转写引擎） | 语音转写（智能语音交互 NLS） | [阿里云 RAM 访问控制](https://ram.console.aliyun.com/users) → 创建 RAM 用户 → 勾选「OpenAPI 调用访问」→ 授权 `AliyunNLSFullAccess` + `AliyunOSSFullAccess` → 复制 **AccessKey ID** / **AccessKey Secret**，填入 `ALIBABA_ACCESS_KEY_ID` / `ALIBABA_ACCESS_KEY_SECRET` |
+| **DeepSeek**（分析阶段） | 个性化洞察生成 | [DeepSeek 开放平台](https://platform.deepseek.com) → API Keys → 创建 Key，填入 `DEEPSEEK_API_KEY` |
+
+> 转写引擎切换：编辑 `config/settings.yaml` 中 `transcriber.provider` 为 `volcengine`（默认）/ `alibaba` / `whisper`（本地，无需 Key 但 CPU 极慢）。
 
 **前置条件**：需要安装 ffmpeg（pydub 音频处理依赖）
 - macOS: `brew install ffmpeg`
