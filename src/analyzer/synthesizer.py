@@ -11,6 +11,8 @@ import json
 import time
 from typing import Optional
 
+from pydantic import ValidationError
+
 from src.analyzer.client import DeepSeekClient, load_prompt, extract_json
 from src.analyzer.chunker import TextChunker
 from src.exceptions import AnalysisError, SynthesisError
@@ -24,25 +26,88 @@ logger = setup_logger("audio-mind.analyzer.synthesizer")
 def _parse_analysis_json(json_str: str) -> AnalysisResult:
     """将 LLM 返回的 JSON 字符串解析为 AnalysisResult
 
+    对非法输入做兜底处理，统一转为 AnalysisError（不泄漏 TypeError/AttributeError）：
+    - 非字符串输入（None 等）→ TypeError → AnalysisError
+    - JSON 语法错误 → JSONDecodeError → AnalysisError
+    - 顶层不是对象（数组/字符串/数字）→ AttributeError → AnalysisError
+    - 字段类型不符（dict 当 list、元素非对象）→ TypeError/ValidationError → AnalysisError
+
     Raises:
         AnalysisError: JSON 格式无效
     """
     try:
         data = json.loads(json_str)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, TypeError) as e:
         raise AnalysisError(
             "LLM 返回的 JSON 解析失败",
             detail=str(e),
         )
 
-    return AnalysisResult(
-        core_viewpoints=[InsightItem(**item) for item in data.get("core_viewpoints", [])],
-        personal_relevance=[InsightItem(**item) for item in data.get("personal_relevance", [])],
-        action_items=[ActionItem(**item) for item in data.get("action_items", [])],
-        key_quotations=[QuotationItem(**item) for item in data.get("key_quotations", [])],
-        controversial_points=[ControversialItem(**item) for item in data.get("controversial_points", [])],
-        resources_mentioned=[ResourceItem(**item) for item in data.get("resources_mentioned", [])],
-    )
+    try:
+        return AnalysisResult(
+            core_viewpoints=[InsightItem(**item) for item in data.get("core_viewpoints", [])],
+            personal_relevance=[InsightItem(**item) for item in data.get("personal_relevance", [])],
+            action_items=[ActionItem(**item) for item in data.get("action_items", [])],
+            key_quotations=[QuotationItem(**item) for item in data.get("key_quotations", [])],
+            controversial_points=[ControversialItem(**item) for item in data.get("controversial_points", [])],
+            resources_mentioned=[ResourceItem(**item) for item in data.get("resources_mentioned", [])],
+        )
+    except (AttributeError, TypeError, ValidationError) as e:
+        raise AnalysisError(
+            "LLM 返回的 JSON 结构不符合预期",
+            detail=str(e),
+        )
+
+
+# LLM 返回 JSON 的修复次数上限
+MAX_JSON_REPAIRS = 2
+
+
+def _parse_with_repair(json_text: str, client: DeepSeekClient, max_repairs: int = MAX_JSON_REPAIRS) -> AnalysisResult:
+    """解析 LLM 返回的 JSON，失败时交给 LLM 修复重试
+
+    覆盖两类失败：
+    - JSON 语法错误（json.loads 失败 → AnalysisError）
+    - 结构错误（字段缺失/类型不符 → pydantic ValidationError）
+
+    Args:
+        json_text: LLM 原始返回文本
+        client: DeepSeek 客户端（用于修复调用）
+        max_repairs: 最大修复次数（默认 2）
+
+    Returns:
+        解析成功的 AnalysisResult
+
+    Raises:
+        SynthesisError: 修复 max_repairs 次后仍无法解析
+    """
+    # 规范化输入：None/非字符串统一转字符串，避免 replace/parse 崩溃
+    current = json_text if isinstance(json_text, str) else str(json_text)
+
+    for attempt in range(max_repairs + 1):
+        try:
+            return _parse_analysis_json(current)
+        except (AnalysisError, ValidationError) as e:
+            if attempt >= max_repairs:
+                raise SynthesisError(
+                    f"LLM 返回的 JSON 在 {max_repairs} 次修复后仍解析失败",
+                    detail=f"原始响应: {json_text[:500]}\n最后错误: {e}",
+                )
+            logger.warning(f"JSON 解析失败（第 {attempt + 1} 次），请求 LLM 修复...: {e}")
+
+            sys_prompt, usr_prompt = load_prompt("fix_json")
+            # 先替换 error_detail（系统生成），再替换 original_output（LLM 内容可能含
+            # "{{...}}" 字面量，后替换可避免被二次污染）
+            usr_prompt = usr_prompt.replace("{{error_detail}}", str(e))
+            usr_prompt = usr_prompt.replace("{{original_output}}", current)
+
+            current = client.chat(sys_prompt, usr_prompt)
+            # 修复返回同样可能带 ```json 代码块，先提取再进入下一轮校验
+            current = extract_json(current)
+            logger.debug(f"LLM 修复返回 (前200字符): {current[:200]}...")
+
+    # 理论不可达（循环内已 return/raise），防御性兜底
+    raise SynthesisError("LLM 返回的 JSON 解析失败", detail=json_text[:500])
 
 
 def analyze_episode(
@@ -100,7 +165,7 @@ def _analyze_direct(
     json_text = extract_json(response)
     logger.debug(f"LLM JSON 响应 (前200字符): {json_text[:200]}...")
 
-    return _parse_analysis_json(json_text)
+    return _parse_with_repair(json_text, client)
 
 
 def _analyze_long(
@@ -147,4 +212,4 @@ def _analyze_long(
     json_text = extract_json(response)
     logger.info(f"全局合成完成，耗时: {time.monotonic() - syn_start:.1f}s")
 
-    return _parse_analysis_json(json_text)
+    return _parse_with_repair(json_text, client)

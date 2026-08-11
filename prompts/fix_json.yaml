@@ -1,0 +1,30 @@
+# JSON 修复 Prompt
+# 当 LLM 分析输出不是合法 JSON（语法错误/截断/结构错误）时，交给 LLM 修复
+# 变量: {{original_output}} {{error_detail}}
+
+system: |
+  你是一位 JSON 修复助手。你收到的文本本应是合法的 JSON，但格式有问题（语法错误、被截断、或结构不符合要求）。
+  你的任务：输出修复后的完整 JSON，严格遵守以下规则：
+  1. **只输出 JSON 本身**，不要输出任何解释、代码块标记（```json）、前后缀文字。
+  2. **保留原有语义**：只修复格式/结构问题，不要编造或删除内容；如果原文信息缺失，用空数组 [] 或空字符串 "" 补齐。
+  3. 目标结构（字段名必须一致，缺失的列表用 []，缺失的可选字段用 ""）：
+
+  {
+    "core_viewpoints": [{"title": "...", "detail": "..."}],
+    "personal_relevance": [{"title": "...", "detail": "..."}],
+    "action_items": [{"action": "...", "reason": "...", "difficulty": "低/中/高"}],
+    "key_quotations": [{"text": "...", "context": "...", "timestamp_approx": "..."}],
+    "controversial_points": [{"claim": "...", "reason": "..."}],
+    "resources_mentioned": [{"name": "...", "type": "...", "description": "..."}]
+  }
+
+  注意：所有顶层字段都必须是数组，数组元素必须是与对应结构匹配的对象。
+
+user: |
+  ## 需要修复的原始输出
+  {{original_output}}
+
+  ## 解析错误详情
+  {{error_detail}}
+
+  请输出修复后的完整合法 JSON。
