@@ -1,4 +1,4 @@
-"""画像管理模块：从 CLAUDE.md 读取/写入用户画像"""
+"""画像管理模块：从本地 persona.local.md（优先）或 CLAUDE.md 读取/写入用户画像"""
 
 import re
 from pathlib import Path
@@ -10,12 +10,15 @@ from src.utils.logger import setup_logger
 logger = setup_logger("audio-mind.persona")
 
 PERSONA_HEADER = "## User Persona"
+LOCAL_PERSONA_FILE = "persona.local.md"  # 本地画像文件（已被 .gitignore 排除，不提交到仓库）
 
 
 class PersonaManager:
     """用户画像管理器
 
-    负责从 CLAUDE.md 中读取用户画像，以及将填写好的画像写入。
+    负责读取用户画像，以及将填写好的画像写入。
+    画像优先存储在本地 persona.local.md（不入 Git），
+    兼容从 CLAUDE.md 的 ``## User Persona`` 段读取旧数据。
     画像存储格式见 DESIGN.md 5.1 节。
     """
 
@@ -25,13 +28,16 @@ class PersonaManager:
             project_root = Path(__file__).parent.parent.parent
         self.project_root = Path(project_root)
         self.claude_md_path = self.project_root / "CLAUDE.md"
+        self.local_persona_path = self.project_root / LOCAL_PERSONA_FILE
 
     def has_persona(self) -> bool:
-        """检查 CLAUDE.md 中是否已有用户画像
+        """检查是否已有用户画像（本地文件或 CLAUDE.md 段）
 
-        只检测真正的 Markdown 二级标题行（以 ## User Persona 开头），
-        排除代码块内引用的字符串。
+        本地 persona.local.md 存在即视为有画像；
+        否则检查 CLAUDE.md 中真正的 Markdown 二级标题行（排除代码块内引用）。
         """
+        if self.local_persona_path.exists():
+            return True
         if not self.claude_md_path.exists():
             return False
         content = self.claude_md_path.read_text(encoding="utf-8")
@@ -39,17 +45,20 @@ class PersonaManager:
         return bool(re.search(rf"^{re.escape(PERSONA_HEADER)}\s*$", content, re.MULTILINE))
 
     def read_persona(self) -> Optional[PersonaData]:
-        """从 CLAUDE.md 读取用户画像
+        """读取用户画像（本地文件优先，其次 CLAUDE.md 段）
 
         Returns:
             PersonaData（如果画像存在），否则 None
         """
         if not self.has_persona():
-            logger.info("CLAUDE.md 中未找到用户画像")
+            logger.info("未找到用户画像")
             return None
 
-        content = self.claude_md_path.read_text(encoding="utf-8")
-        persona_text = self._extract_persona_section(content)
+        if self.local_persona_path.exists():
+            persona_text = self.local_persona_path.read_text(encoding="utf-8")
+        else:
+            content = self.claude_md_path.read_text(encoding="utf-8")
+            persona_text = self._extract_persona_section(content)
 
         if not persona_text:
             return None
@@ -59,45 +68,34 @@ class PersonaManager:
         return persona
 
     def write_persona(self, persona: PersonaData) -> None:
-        """将用户画像写入 CLAUDE.md
-
-        如果 CLAUDE.md 中已有画像，替换之；否则在文件末尾追加。
-        """
+        """将用户画像写入本地 persona.local.md（不写入 CLAUDE.md）"""
         persona_block = self._format_persona(persona)
-
-        if self.claude_md_path.exists():
-            content = self.claude_md_path.read_text(encoding="utf-8")
-        else:
-            content = ""
-
-        if PERSONA_HEADER in content:
-            # 替换已有画像段（仅匹配行首标题，排除行中引用）
-            pattern = rf"^{re.escape(PERSONA_HEADER)}\s*$[\s\S]*?(?=\n##\s|\Z)"
-            content = re.sub(pattern, persona_block.strip(), content, flags=re.MULTILINE)
-        else:
-            # 在文件末尾追加
-            if content and not content.endswith("\n"):
-                content += "\n"
-            content += f"\n{persona_block}\n"
-
-        self.claude_md_path.write_text(content, encoding="utf-8")
-        logger.info(f"用户画像已写入: {self.claude_md_path}")
+        self.local_persona_path.write_text(persona_block, encoding="utf-8")
+        logger.info(f"用户画像已写入: {self.local_persona_path}")
 
     def delete_persona(self) -> bool:
-        """删除用户画像段
+        """删除用户画像（本地文件；并兼容清理 CLAUDE.md 中的旧画像段）
 
         Returns:
             True 如果找到并删除，False 如果没有画像
         """
-        if not self.has_persona():
-            return False
+        removed = False
 
-        content = self.claude_md_path.read_text(encoding="utf-8")
-        pattern = rf"\n*{re.escape(PERSONA_HEADER)}[\s\S]*?(?=\n##\s|\Z)"
-        content = re.sub(pattern, "", content)
-        self.claude_md_path.write_text(content.rstrip() + "\n", encoding="utf-8")
-        logger.info("用户画像已删除")
-        return True
+        if self.local_persona_path.exists():
+            self.local_persona_path.unlink()
+            removed = True
+
+        if self.claude_md_path.exists():
+            content = self.claude_md_path.read_text(encoding="utf-8")
+            if PERSONA_HEADER in content:
+                pattern = rf"\n*{re.escape(PERSONA_HEADER)}[\s\S]*?(?=\n##\s|\Z)"
+                content = re.sub(pattern, "", content)
+                self.claude_md_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+                removed = True
+
+        if removed:
+            logger.info("用户画像已删除")
+        return removed
 
     def get_persona_text(self) -> str:
         """获取画像的纯文本表示（用于注入 prompt）

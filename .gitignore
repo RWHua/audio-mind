@@ -1,6 +1,9 @@
 # 环境变量
 .env
 
+# 本地用户画像（含个人隐私，不入仓库）
+persona.local.md
+
 # Python
 __pycache__/
 *.py[cod]
