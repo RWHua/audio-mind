@@ -237,6 +237,28 @@ def download_audio(
             total_size = int(resp.headers.get("Content-Length", 0))
             mode = "wb"
             downloaded = 0
+        elif resp.status_code == 416 and headers:
+            # Range 起点超出文件范围：本地文件已 >= 远端完整大小
+            # 用 HEAD 校验远端 Content-Length，确认本地文件完整后直接复用
+            logger.info("服务器返回 416（Range 超出范围），校验本地文件完整性...")
+            try:
+                head_resp = session.head(episode.audio_url, timeout=settings.download.timeout)
+                remote_size = int(head_resp.headers.get("Content-Length", 0))
+            except Exception:
+                remote_size = 0
+            local_size = filepath.stat().st_size if filepath.exists() else 0
+            if remote_size > 0 and local_size >= remote_size:
+                logger.info(
+                    f"本地文件已完整 ({local_size/1024/1024:.1f}MB >= "
+                    f"{remote_size/1024/1024:.1f}MB)，直接复用"
+                )
+                return filepath
+            logger.warning("本地文件不完整，删除后重新下载")
+            filepath.unlink(missing_ok=True)
+            resp = session.get(episode.audio_url, stream=True)
+            total_size = int(resp.headers.get("Content-Length", 0))
+            mode = "wb"
+            downloaded = 0
         else:
             resp.raise_for_status()
             total_size = int(resp.headers.get("Content-Length", 0))

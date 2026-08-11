@@ -195,6 +195,8 @@ class PersonaManager:
         challenges_section = re.search(r"### 当前挑战\n([\s\S]*?)(?=###|\Z)", text)
         if challenges_section:
             challenges = re.findall(r"-\s*(.+)", challenges_section.group(1))
+            # 过滤 HTML 注释行（如 _format_persona 生成的 <!-- 完 -->）
+            challenges = [c.strip() for c in challenges if "<!--" not in c and "-->" not in c]
             if challenges:
                 data["current_challenges"] = "; ".join(c.strip() for c in challenges)
 

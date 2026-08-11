@@ -243,6 +243,7 @@ def transcribe_volcengine(
 
     # ── Step 1: 提交任务 ────────────────────────────────
     request_id = str(uuid.uuid4())
+    submit_start = time.monotonic()
 
     submit_headers = {
         "X-Api-App-Key": cfg.app_id,
