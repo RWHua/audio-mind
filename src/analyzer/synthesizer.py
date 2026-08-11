@@ -13,7 +13,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from src.analyzer.client import DeepSeekClient, load_prompt, extract_json
+from src.analyzer.client import DeepSeekClient, load_prompt, extract_json, apply_template
 from src.analyzer.chunker import TextChunker
 from src.exceptions import AnalysisError, SynthesisError
 from src.models import AnalysisResult, InsightItem, ActionItem, QuotationItem, ControversialItem, ResourceItem, EpisodeMetadata
@@ -96,10 +96,11 @@ def _parse_with_repair(json_text: str, client: DeepSeekClient, max_repairs: int 
             logger.warning(f"JSON 解析失败（第 {attempt + 1} 次），请求 LLM 修复...: {e}")
 
             sys_prompt, usr_prompt = load_prompt("fix_json")
-            # 先替换 error_detail（系统生成），再替换 original_output（LLM 内容可能含
-            # "{{...}}" 字面量，后替换可避免被二次污染）
-            usr_prompt = usr_prompt.replace("{{error_detail}}", str(e))
-            usr_prompt = usr_prompt.replace("{{original_output}}", current)
+            # 安全替换：单次扫描，LLM 输出里的 {{...}} 字面量不会被二次替换
+            usr_prompt = apply_template(usr_prompt, {
+                "error_detail": str(e),
+                "original_output": current,
+            })
 
             current = client.chat(sys_prompt, usr_prompt)
             # 修复返回同样可能带 ```json 代码块，先提取再进入下一轮校验
@@ -154,10 +155,12 @@ def _analyze_direct(
     client = DeepSeekClient(settings)
     system_prompt, user_prompt = load_prompt("analyze")
 
-    # 替换变量
-    user_prompt = user_prompt.replace("{{persona}}", persona_text)
-    user_prompt = user_prompt.replace("{{episode_info}}", episode_info)
-    user_prompt = user_prompt.replace("{{transcript}}", transcript_text)
+    # 替换变量（安全替换：单次扫描，杜绝二次污染）
+    user_prompt = apply_template(user_prompt, {
+        "persona": persona_text,
+        "episode_info": episode_info,
+        "transcript": transcript_text,
+    })
 
     logger.info("调用 LLM 进行全文分析...")
     response = client.chat(system_prompt, user_prompt)
@@ -186,9 +189,11 @@ def _analyze_long(
     for i, chunk in enumerate(chunks, 1):
         seg_start = time.monotonic()
         sys_prompt, usr_prompt = load_prompt("summarize_chunk")
-        usr_prompt = usr_prompt.replace("{{chunk_index}}", str(i))
-        usr_prompt = usr_prompt.replace("{{total_chunks}}", str(len(chunks)))
-        usr_prompt = usr_prompt.replace("{{chunk_text}}", chunk)
+        usr_prompt = apply_template(usr_prompt, {
+            "chunk_index": str(i),
+            "total_chunks": str(len(chunks)),
+            "chunk_text": chunk,
+        })
 
         logger.info(f"分析第 {i}/{len(chunks)} 段 ({len(chunk)} 字)...")
         response = client.chat(sys_prompt, usr_prompt)
@@ -204,9 +209,11 @@ def _analyze_long(
     )
 
     sys_prompt, usr_prompt = load_prompt("synthesize")
-    usr_prompt = usr_prompt.replace("{{persona}}", persona_text)
-    usr_prompt = usr_prompt.replace("{{episode_info}}", episode_info)
-    usr_prompt = usr_prompt.replace("{{chunk_summaries}}", chunk_summaries)
+    usr_prompt = apply_template(usr_prompt, {
+        "persona": persona_text,
+        "episode_info": episode_info,
+        "chunk_summaries": chunk_summaries,
+    })
 
     response = client.chat(sys_prompt, usr_prompt)
     json_text = extract_json(response)

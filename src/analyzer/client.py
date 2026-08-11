@@ -107,6 +107,29 @@ def load_prompt(name: str) -> tuple[str, str]:
     return data.get("system", ""), data.get("user", "")
 
 
+def apply_template(template: str, variables: dict) -> str:
+    """安全替换模板中的 {{var}} 占位符
+
+    与链式 ``str.replace`` 的关键区别：**单次扫描 + 字典替换**——
+    替换结果中出现的 ``{{...}}`` 字面量不会被再次匹配替换，
+    从根本上杜绝"二次替换污染"（内容里含其他占位符字面量时被篡改）。
+
+    Args:
+        template: 含 ``{{var}}`` 占位符的模板文本
+        variables: {占位符名: 替换值}，如 {"persona": "...", "transcript": "..."}
+
+    Returns:
+        替换后的文本；未匹配到的占位符原样保留（便于发现缺失变量）
+    """
+    pattern = re.compile(r"\{\{(\w+)\}\}")
+
+    def _repl(match: re.Match) -> str:
+        name = match.group(1)
+        return variables.get(name, match.group(0))
+
+    return pattern.sub(_repl, template)
+
+
 def extract_json(text: str) -> str:
     """从 LLM 响应中提取 JSON 内容
 
