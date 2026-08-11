@@ -37,7 +37,6 @@ def sign_rpc(method, params, secret):
 
 
 def _run_full_nls_test():
-    ndef main():
     # ── Step 1: 转换 WAV → 16kHz MP3 ──
     print("=" * 60)
     print("Step 1: 转换音频格式 (WAV → 16kHz MP3)")
