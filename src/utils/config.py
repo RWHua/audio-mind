@@ -69,6 +69,9 @@ class VolcengineConfig(BaseModel):
     model_name: str = "bigmodel"
     chunk_duration: int = 1500       # 单段最长秒数（25分钟）
     api_timeout: int = 180           # 单段 API 超时秒数
+    show_utterances: bool = True     # 必须开启才能在 utterances 中返回说话人标识
+    ssd_version: str = ""           # "" 不启用 | "200" 标准/长音频 | "300" 会议长音频（推荐多人会议）
+    ssd_mode: Optional[int] = None   # 仅 ssd_version="200" 时有效：0 普通 / 1 长音频聚类
 
 
 class AlibabaConfig(BaseModel):

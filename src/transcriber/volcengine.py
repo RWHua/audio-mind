@@ -254,16 +254,26 @@ def transcribe_volcengine(
         "Content-Type": "application/json",
     }
 
+    request_params = {
+        "model_name": model_name,
+        "enable_itn": True,
+        "enable_punc": True,
+        "enable_ddc": True,
+        "enable_speaker_info": True,
+        # 官方文档：开启 enable_speaker_info 后必须同时设置 show_utterances=true，
+        # 否则 utterances 中不会有说话人标识
+        "show_utterances": bool(cfg.show_utterances),
+    }
+    # 说话人分离版本："200" 标准/长音频；"300" 会议长音频（多人会议推荐）
+    if cfg.ssd_version:
+        request_params["ssd_version"] = str(cfg.ssd_version)
+    if cfg.ssd_mode is not None:
+        request_params["ssd_mode"] = int(cfg.ssd_mode)
+
     submit_body = {
         "user": {"uid": cfg.app_id},
         "audio": {"url": public_url, "format": audio_format},
-        "request": {
-            "model_name": model_name,
-            "enable_itn": True,
-            "enable_punc": True,
-            "enable_ddc": True,
-            "enable_speaker_info": True,
-        },
+        "request": request_params,
     }
 
     last_error = ""
@@ -364,7 +374,12 @@ def transcribe_volcengine(
                 utterances = result.get("result", {}).get("utterances", [])
                 if utterances:
                     for u in utterances:
-                        speaker = u.get("additions", {}).get("speaker", "")
+                        # 兼容两种返回结构：additions.speaker 或顶层 speaker_id
+                        speaker = (
+                            u.get("additions", {}).get("speaker")
+                            or u.get("speaker_id")
+                            or ""
+                        )
                         label = f"说话人{speaker}: " if speaker else ""
                         segments.append(TranscriptSegment(
                             start=u.get("start_time", 0) / 1000.0,

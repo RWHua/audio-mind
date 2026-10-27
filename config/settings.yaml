@@ -30,6 +30,9 @@ volcengine:
   model_name: "bigmodel"
   chunk_duration: 1500        # 单段最长秒数（25分钟），超长音频自动切片
   api_timeout: 180            # 单段 API 超时秒数
+  show_utterances: true       # 开启后 utterances 才返回说话人标识
+  ssd_version: "300"          # 说话人分离会议长音频版（多人会议推荐）
+  ssd_mode: ~                 # 仅 ssd_version="200" 时有效
 
 deepseek:
   base_url: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"

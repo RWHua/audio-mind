@@ -33,6 +33,9 @@ temp_*
 # 输出目录
 output/
 
+# 本地模型权重（声纹模型，不入仓库）
+pretrained_models/
+
 # IDE
 .vscode/
 .idea/

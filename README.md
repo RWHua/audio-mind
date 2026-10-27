@@ -57,6 +57,25 @@ uv run python -m src.pipeline --url https://www.xiaoyuzhoufm.com/episode/xxxxx
 uv run pytest
 ```
 
+## 会议转写模式（本地，保密优先）🎧
+
+针对**公司内部会议录音**的离线转写模式：录音不出本机，多人声纹分角色，产出可分钟级溯源的存档三件套。
+
+```bash
+# 转写 + 声纹分角色（后台跑）
+.venv/Scripts/python.exe scripts/local_meeting_pipeline.py "会议录音.m4a" output/mt01/segments.json
+
+# 生成转写稿（角色 + [MM:SS] 分钟标注）
+.venv/Scripts/python.exe scripts/gen_transcript_md.py output/mt01/segments.json 存档/transcript.md
+
+# 生成会议纪要（GLM，全量分钟溯源 + 反编造校验，需 ZAI_API_KEY 环境变量）
+.venv/Scripts/python.exe scripts/gen_minutes.py output/mt01/segments.json 存档/minutes.md "会议名"
+```
+
+- 适用场景：内部会议纪要、共识/行动项梳理、需求溯源；**云端 ASR（火山/阿里云）需先确认公司允许数据出本机**
+- 完整流程、性能基准与 12 条踩坑清单见 `.claude/skills/local-meeting-transcribe/SKILL.md`
+- 依赖：venv 需 Python 3.11 + `speechbrain` `scikit-learn`（安装步骤见 SKILL.md）
+
 ## 技术选型理由
 
 | 组件 | 选择 | 理由 |
@@ -89,4 +108,12 @@ src/
 ├── analyzer/            # DeepSeek + 分段
 ├── models/              # Pydantic 数据模型
 └── utils/               # 配置/日志/HTTP/画像/文档生成
+scripts/
+├── local_meeting_pipeline.py  # 本地会议转写+声纹分角色（保密优先）
+├── gen_transcript_md.py       # segments.json → transcript.md
+├── gen_minutes.py             # segments.json → minutes.md（GLM）
+└── fact_check.py              # 事实核查（Tavily+LLM）
+.claude/skills/
+├── audio-mind-pipeline/       # 播客 Pipeline 运维 skill
+└── local-meeting-transcribe/  # 本地会议转写 skill（含踩坑清单）
 ```
